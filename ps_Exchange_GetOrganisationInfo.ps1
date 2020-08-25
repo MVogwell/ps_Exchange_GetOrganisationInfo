@@ -1,4 +1,4 @@
-# Exchange and AD Data extraction
+# Exchange and AD Data extract
 
 <#
 
@@ -42,6 +42,7 @@ Version 1.1 - Fixed bug with Exchange database enumeration,
 			  Fixed bug with mailboxstatistics using alias instead of Guid, 
 			  Added data from Exchange DAGs
 			  Changed the output file name to ExchangeDataExtraction.json (old name was confusing)
+Version 1.1.1 - Fixed bug with Get-ADDomain returning two objects called ObjectGUID and ObjectGuid which caused a problem with the json import
 
 .LINK
 None yet.
@@ -125,7 +126,7 @@ Function GetMailboxData() {
 
 #@# Main
 Write-Host "`n`nExchange Organization Data Extractor" -ForegroundColor Green
-Write-Host "MVogwell - Aug 2020 - Version 1.1`n" -ForegroundColor Green
+Write-Host "MVogwell - Aug 2020 - Version 1.1.1`n" -ForegroundColor Green
 
 # Create startup variables
 $bStartupSuccess = $True
@@ -237,7 +238,7 @@ If ($bStartupSuccess -eq $True) {
 		Write-Host "`t... AD Domain Data" -ForegroundColor Cyan
 	
 		If ($bLocalADCommandsAvailable -eq $True) {
-			$objADDomainData = Get-ADDomain -Server $sDC
+			$objADDomainData = Get-ADDomain -Server $sDC | Select-Object Forest, DNSRoot, NetBIOSName, DistinguishedName, ParentDomain, ReadOnlyReplicaDirectoryServers, ReplicaDirectoryServers, AllowedDNSSuffixes, @{n='DomainMode'; e={$_.DomainMode.toString()}}, ObjectGuid
 				
 			$arrDCData = @()
 
@@ -254,7 +255,7 @@ If ($bStartupSuccess -eq $True) {
 		
 		}
 		Else {
-			$objADDomainData = Invoke-Command -ComputerName $sDC -ScriptBlock { Get-ADDomain }
+			$objADDomainData = Invoke-Command -ComputerName $sDC -ScriptBlock { Get-ADDomain | Select-Object Forest, DNSRoot, NetBIOSName, DistinguishedName, ParentDomain, ReadOnlyReplicaDirectoryServers, ReplicaDirectoryServers, AllowedDNSSuffixes, @{n='DomainMode'; e={$_.DomainMode.toString()}}, ObjectGuid}
 			
 			$arrDCData = @()
 			
@@ -411,7 +412,7 @@ If ($bStartupSuccess -eq $True) {
 
 				# Note: DatabaseVolumeMountPoint is reduced to the first two characters because json parsing fails if the value has a trailing \ character
 				# Note: Get-MailboxDatabaseCopyStatus has to have -erroraction set to silently continue as some DB copies may fail which would prevent recording of any
-				 $arrMbxDbCopy += Get-MailboxDatabaseCopyStatus -Server $sExchServer -DomainController $sDC -WarningAction:"SilentlyContinue"  -ErrorAction "SilentlyContinue" | Select-Object @{n="Identity"; e={$_.Identity.DistinguishedName}}, DatabaseName, Status, MailboxServer, ActiveDatabaseCopy, @{n='DatabaseVolumeMountPoint'; e= {($_.DatabaseVolumeMountPoint).Substring(0,2)}}, DiskFreeSpacePercent
+				$arrMbxDbCopy += Get-MailboxDatabaseCopyStatus -Server $sExchServer -DomainController $sDC -WarningAction:"SilentlyContinue"  -ErrorAction "SilentlyContinue" | Select-Object @{n="Identity"; e={$_.Identity.DistinguishedName}}, DatabaseName, @{n='Status'; e={$_.Status.toString()}}, MailboxServer, ActiveDatabaseCopy, @{n='DatabaseVolumeMountPoint'; e= {($_.DatabaseVolumeMountPoint).Substring(0,2)}}, DiskFreeSpacePercent
 			}
 			
 			$arrMbxDbCopy = $arrMbxDbCopy | Sort-Object DatabaseName
@@ -453,7 +454,7 @@ If ($bStartupSuccess -eq $True) {
 	Try {
 		Write-Host "`t... User mailbox data" -ForegroundColor Cyan
 		
-		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "UserMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled
+		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "UserMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled, HiddenFromAddressListsEnabled
 		$arrMbxResults = GetMailboxData -arrMbx $arrMbx -objADData $objADData
 		$objResults | Add-Member -MemberType NoteProperty -Name "UserMailboxes" -Value $arrMbxResults
 	}
@@ -465,7 +466,7 @@ If ($bStartupSuccess -eq $True) {
 	Try {
 		Write-Host "`t... Equipment mailbox data" -ForegroundColor Cyan
 	
-		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "EquipmentMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled
+		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "EquipmentMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled, HiddenFromAddressListsEnabled
 		$arrMbxResults =  GetMailboxData -arrMbx $arrMbx -objADData $objADData
 
 		If ($null -eq $arrMbxResults) { 
@@ -485,7 +486,7 @@ If ($bStartupSuccess -eq $True) {
 	Try {
 		Write-Host "`t... Room mailbox data" -ForegroundColor Cyan
 		
-		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "RoomMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled
+		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "RoomMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled, HiddenFromAddressListsEnabled
 		$arrMbxResults =  GetMailboxData -arrMbx $arrMbx -objADData $objADData
 		
 		If ($null -eq $arrMbxResults) { 
@@ -504,7 +505,7 @@ If ($bStartupSuccess -eq $True) {
 	Try {
 		Write-Host "`t... Linked mailbox data" -ForegroundColor Cyan
 	
-		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "LinkedMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled
+		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "LinkedMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled, HiddenFromAddressListsEnabled
 		$arrMbxResults =  GetMailboxData -arrMbx $arrMbx -objADData $objADData
 		
 		If ($null -eq $arrMbxResults) { 
@@ -523,7 +524,7 @@ If ($bStartupSuccess -eq $True) {
 	Try {
 		Write-Host "`t... Shared mailbox data" -ForegroundColor Cyan
 		
-		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "SharedMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled
+		$arrMbx = Get-Mailbox -DomainController $sDC -ResultSize Unlimited -WarningAction:"SilentlyContinue" | Where-Object {$_.RecipientTypeDetails -eq "SharedMailbox"} | Select-Object Name, Alias, DisplayName, DistinguishedName, SamAccountName, userPrincipalName, Guid, IsLinked, IsMailboxEnabled, IsShared, LegacyExchangeDN, LinkedMasterAccount, @{n='MaxReceiveSize' ;e={$_.MaxReceiveSize.Value}}, @{n='MaxSendSize' ;e={$_.MaxSendSize.Value}}, Office, OrganizationalUnit, RetentionPolicy, ArchiveDatabase, AccountDisabled, @{n='DatabaseName' ;e={$_.Database.Name}}, @{n='DatabaseDN' ;e={$_.Database.DistinguishedName}}, @{n='DatabaseServerName' ;e={$_.ServerName}}, DeliverToMailboxAndForward, UMEnabled, @{n='WhenCreatedUTC' ; e={$_.WhenCreatedUTC.toString()}}, EmailAddresses, @{n='WindowsEmailAddress'; e={$_.WindowsEmailAddress.Address}}, @{n='PrimarySmtpAddress'; e={$_.PrimarySmtpAddress.Address}}, EmailAddressPolicyEnabled, HiddenFromAddressListsEnabled
 		$arrMbxResults =  GetMailboxData -arrMbx $arrMbx -objADData $objADData
 		
 		If ($null -eq $arrMbxResults) { 
@@ -592,7 +593,7 @@ If ($bStartupSuccess -eq $True) {
 				if ($null -eq $arrGrpMembers) {
 					$objGroup | Add-Member -MemberType NoteProperty -Name "Members" -Value "Null returned"
 				}
-				ElseIf($arrGrpMembers.Count -le 0) {
+				ElseIf(($arrGrpMembers | Measure-Object).Count -le 0) {
 					$objGroup | Add-Member -MemberType NoteProperty -Name "Members" -Value "No members"
 				}
 				Else {
@@ -674,6 +675,3 @@ If ($bStartupSuccess -eq $True) {
 		}
 	}
 }
-
-
-

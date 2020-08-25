@@ -70,8 +70,8 @@ $data = Import-CliXML "Full path of the data file"
 
 ### Listing the top level data once the data has been imported:
 
-($data | Get-Member -MemberType NoteProperty).Name
-
+$tl = ($data | Get-Member -MemberType NoteProperty | Select-Object Name).Name
+$tl | ForEach { Write-Host $_ ; $data.$($_) | Out-Gridview ; $x = Read-Host "`tPress enter to continue"  }
 
 ### Notes
 No responsibility is taken for you running this script or any outcomes.
